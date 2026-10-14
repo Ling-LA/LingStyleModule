@@ -197,25 +197,31 @@ public final class ModuleRuntime {
             // Copy only primitive/string fields; never keep mutable native MsgRecord in queues.
             int type=(int)Host.number(record,"chatType");
             if(type!=1&&type!=2&&type!=100)return;
-            if(Host.number(record,"sendType")!=0||Host.text(record,"senderUin").equals(account))return;
+            PokeEvent poke=PokeEvent.from(record,host::uin);
+            if(poke!=null&&!poke.targets(account))return;
+            if(poke==null&&(Host.number(record,"sendType")!=0||Host.text(record,"senderUin").equals(account)))return;
             if(!Policy.fresh(Host.number(record,"msgTime"),System.currentTimeMillis()))return;
             if(Host.number(record,"msgTime")<activeSince)return;
             try{if(Boolean.TRUE.equals(Host.field(record,"isImportMsg")))return;}catch(Exception ignored){}
             String uid=Host.text(record,"peerUid"),peer=Host.text(record,"peerUin"),sender=Host.text(record,"senderUin"),senderUid=Host.text(record,"senderUid");
             if(!peer.matches("[1-9][0-9]+"))peer=host.uin(uid);
             if(!sender.matches("[1-9][0-9]+"))sender=host.uin(senderUid);
+            if(poke!=null){sender=poke.actor;senderUid=host.uid(sender);if(senderUid.isEmpty())return;}
             long id=Host.number(record,"msgId");
             Settings.Snapshot config=settings.snapshot();
             if(!account.equals(config.account)||!config.auto||Policy.blocked(config.blacklist,uid,peer,sender,senderUid)||uid.isEmpty())return;
+            if(poke!=null&&!config.pokeReplies)return;
             if(!config.blacklist.isEmpty()&&(peer.isEmpty()||sender.isEmpty()))return;
             if(account.equals(host.uin(senderUid)))return;
             if(type!=2&&(!config.privateReplies||!host.friend(uid)))return;
+            if(poke!=null&&type!=2&&!sender.equals(peer))return;
             if(type==2&&!config.groups.contains(peer))return;
             Object raw=Host.field(record,"elements");if(!(raw instanceof List))return;
             StringBuilder text=new StringBuilder();boolean at=false,atOther=false;
             QuoteRef quote=null;
             List<IncomingImages.Picture> pictures=new ArrayList<>();
-            for(Object element:((List<?>)raw).toArray()){
+            if(poke!=null)text.append("对方刚刚戳了你一下，请用一句简短自然的话回应这次戳一戳。");
+            else for(Object element:((List<?>)raw).toArray()){
                 if(Host.number(element,"elementType")==7){if(quote!=null)return;quote=QuotedImages.snapshot(element);continue;}
                 if(Host.number(element,"elementType")==2){pictures.add(IncomingImages.snapshot(element));if(pictures.size()>VisionPolicy.MAX_IMAGES){autoTrace="每条消息最多识别 2 张图片，已跳过";return;}continue;}
                 if(Host.number(element,"elementType")!=1)return;
@@ -223,7 +229,7 @@ public final class ModuleRuntime {
                 if(Host.mention(e)){if(account.equals(host.uin(mention)))at=true;else atOther=true;continue;}
                 text.append(Host.text(e,"content"));
             }
-            if(type==2&&config.atOnly&&!at)return;
+            if(poke==null&&type==2&&config.atOnly&&!at)return;
             if(type==2&&!at&&atOther)return;
             String incoming=text.toString().trim();if((incoming.isEmpty()&&pictures.isEmpty()&&quote==null)||incoming.length()>4000)return;
             String scope=Policy.replyScope(account,type,uid,senderUid,sender);
@@ -231,13 +237,13 @@ public final class ModuleRuntime {
             if(!seen.first(account,type+":"+uid,id,SystemClock.elapsedRealtime())){duplicates.incrementAndGet();return;}
             if(skipActive(config,type,uid))return;
             String lane=account+":"+type+":"+uid;
-            final boolean smart=type==2&&!at;
+            final boolean smart=type==2&&!at&&poke==null;
             if(!reserve(lane,smart)){autoTrace="会话冷却、忙碌或速率规则跳过";return;}
             acceptAt=System.currentTimeMillis();autoTrace="已接收待回复消息 · 屏幕="+interactive();writeDiagnostic();
             XposedBridge.log("[LingStyle] auto accepted style="+config.style.name()+" interactive="+interactive());
             final String fUid=uid,fPeer=peer,fSender=sender,fSenderUid=senderUid;
             final QuoteRef reference=quote;
-            try{work.execute(()->autoReply(config,type,fUid,fPeer,fSender,fSenderUid,incoming,lane,scope,id,pictures,reference,smart));}
+            try{work.execute(()->autoReply(config,type,fUid,fPeer,fSender,fSenderUid,incoming,lane,scope,id,pictures,reference,smart,poke!=null));}
             catch(RejectedExecutionException full){busy.remove(lane);error("自动回复队列已满");}
         }catch(Throwable e){error("接收异常："+e.getClass().getSimpleName());}
     }
@@ -255,7 +261,7 @@ public final class ModuleRuntime {
         while(lastAmbientSent.size()>256)lastAmbientSent.remove(lastAmbientSent.keySet().iterator().next());
         while(lastReply.size()>256)lastReply.remove(lastReply.keySet().iterator().next());return true;
     }
-    private void autoReply(Settings.Snapshot config,int type,String uid,String peer,String sender,String senderUid,String input,String lane,String scope,long message,List<IncomingImages.Picture> pictures,QuoteRef quote,boolean smart){
+    private void autoReply(Settings.Snapshot config,int type,String uid,String peer,String sender,String senderUid,String input,String lane,String scope,long message,List<IncomingImages.Picture> pictures,QuoteRef quote,boolean smart,boolean poke){
         String owner=config.account;long revision=config.revision;Style style=config.style;
         PowerManager.WakeLock wake=wake();
         try{
@@ -274,6 +280,10 @@ public final class ModuleRuntime {
             }
             ReplyClient.Answer answer=replies.reply(scope,input,imageData,config.endpoint,config.model,config.key,config.fallback,smart);
             if(answer.silent()){if(same(owner,revision))replies.observeImage(answer);autoTrace="模型判断无需插话，保持安静";busy.remove(lane);release(wake);writeDiagnostic();return;}
+            if(!Policy.allowImageComment(smart,!imageData.isEmpty(),answer.intent,ThreadLocalRandom.current().nextInt(100))){
+                if(same(owner,revision))replies.observeImage(answer);
+                autoTrace="图片主动点评未命中 30% 概率，保留图片供追问";busy.remove(lane);release(wake);writeDiagnostic();return;
+            }
             if("comment".equals(answer.intent)){synchronized(this){if(SystemClock.elapsedRealtime()-lastAmbientSent.getOrDefault(lane,0L)<60000){if(same(owner,revision))replies.observeImage(answer);autoTrace="自然点评冷却中，保持安静";busy.remove(lane);release(wake);writeDiagnostic();return;}}}
             modelAt=System.currentTimeMillis();autoTrace="模型生成完成 · 屏幕="+interactive();writeDiagnostic();
             translator.translate(style,answer.text,(result,failure)->{
@@ -286,14 +296,14 @@ public final class ModuleRuntime {
                         String aligned=replies.alignStyle(answer,result,config.endpoint,config.model,config.key);
                         main.post(()->{
                             if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
-                            submitAuto(config,type,uid,lane,answer,aligned,wake);
+                            submitAuto(config,type,uid,lane,message,poke?senderUid:null,answer,aligned,wake);
                         });
                     }catch(Throwable e){busy.remove(lane);release(wake);error("回复语气校对失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName()));}
                 });}catch(RejectedExecutionException full){busy.remove(lane);release(wake);error("回复校对队列已满");}
             });
         }catch(Throwable e){if((!pictures.isEmpty()||(quote!=null&&quote.imageHint))&&same(owner,revision))replies.unreadImage(scope,config.endpoint,config.model,config.key);busy.remove(lane);release(wake);error("回复生成失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName()));}
     }
-    private void submitAuto(Settings.Snapshot config,int type,String uid,String lane,ReplyClient.Answer answer,String result,PowerManager.WakeLock wake){
+    private void submitAuto(Settings.Snapshot config,int type,String uid,String lane,long sourceMessage,String pokeUid,ReplyClient.Answer answer,String result,PowerManager.WakeLock wake){
         if(skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
         final Policy.Once once=new Policy.Once();final Runnable[] timeout={null};
         java.util.function.IntConsumer complete=code->{
@@ -319,7 +329,7 @@ public final class ModuleRuntime {
             Object service=host.kernel(),contact=host.contact(type,uid);
             long id=((Number)Host.call(service,"generateMsgUniqueId",type,System.currentTimeMillis())).longValue();
             sendAt=System.currentTimeMillis();autoTrace="等待 QQ 发送结果 · 屏幕="+interactive();main.postDelayed(timeout[0],20000);writeDiagnostic();
-            invokeSend(send,service,new Object[]{id,contact,host.elements(result),new HashMap<>(),callback});
+            invokeSend(send,service,new Object[]{id,contact,host.autoElements(type,sourceMessage,pokeUid,result),new HashMap<>(),callback});
         }catch(Throwable e){error("自动回复提交异常："+e.getClass().getSimpleName());complete.accept(-998);}
     }
     /** Opt-in diagnostic state contains no peer IDs, message text, key or license. */

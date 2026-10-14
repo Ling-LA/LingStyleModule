@@ -15,6 +15,10 @@ public final class Policy {
         return false;
     }
     public static boolean bypass(String text){return text!=null&&text.startsWith("/");}
+    /** Sample only unsolicited image comments, never explicit answers or private replies. */
+    public static boolean allowImageComment(boolean smart,boolean hasImages,String intent,int roll){
+        return !smart||!hasImages||!"comment".equals(intent)||(roll>=0&&roll<30);
+    }
     /** Never share a group's memory across senders; unknown identity fails closed. */
     public static String replyScope(String account,int type,String peer,String senderUid,String senderUin){
         String sender=senderUin!=null&&senderUin.matches("[1-9][0-9]+")?"uin="+senderUin:

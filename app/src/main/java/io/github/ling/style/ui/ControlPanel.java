@@ -46,13 +46,16 @@ public final class ControlPanel {
         Switch transform=toggle(a,"发送前转换",settings.enabled());controls.addView(transform);
         Switch auto=toggle(a,"自动回复 · 跟随当前风格",settings.auto());controls.addView(auto);
         Switch atOnly=toggle(a,"群聊仅回复 @自己",settings.atOnly());controls.addView(atOnly);
+        Switch poke=toggle(a,"戳一戳自动回复 · 跟随当前风格",settings.pokeReplies());controls.addView(poke);
+        poke.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("pokeReplies",b);});
+        controls.addView(text(a,"自动回复开启后，回应别人戳你；沿用群白名单、好友私聊和黑名单设置。群消息引用原消息回复；戳一戳提示不可引用，群内改为 @戳你的人。",12));
         Switch skipActive=toggle(a,"当前聊天页面不自动回复",settings.skipActive());controls.addView(skipActive);
         skipActive.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("skipActive",b);});
         controls.addView(text(a,"开启后，正在查看的群聊或好友会话交给你处理；离开该会话、后台或息屏时恢复自动回复。生成期间打开该会话也会取消发送。",12));
         transform.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("enabled",b);});
         auto.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("auto",b);});
         atOnly.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("atOnly",b);});
-        controls.addView(text(a,"关闭「仅回复 @自己」后启用智能插话：先判断是否合适，普通分享自然点评，明确提问直接回答，其余保持安静。@其他人的消息不插话。",12));
+        controls.addView(text(a,"关闭「仅回复 @自己」后启用智能插话：主动图片点评按 30% 概率放行，仍受点评冷却限制；明确提问、@自己及好友私聊不受概率限制。未点评的图片保留供后续追问。@其他人的消息不插话。",12));
         controls.addView(text(a,"/ 开头可跳过转换，发送时去掉首个 /。\n网页失败：手写消息发送原文，自动回复取消。",12));
         LinearLayout previewCard=PinkTheme.card(a,"03  /  试一句话");box.addView(previewCard);
         EditText preview=edit(a,"输入一句话预览，不会发送 QQ 消息","");previewCard.addView(preview);

@@ -1,4 +1,25 @@
-# 真机验证记录
+# 验证记录
+
+## 0.1.1：群聊引用、30% 图片点评与戳一戳（2026-10-14）
+
+基线：GitHub `Ling-LA/LingStyleModule` main `526e77130ff90edacb832faddee2cbc227da9083`；打包前复查远端未变化。此次在独立目录 `LingStyleModule-update` 修改，保留原本地目录和安装包。
+
+- 群聊普通自动回复由 `IMsgUtilApi.createReplyElement(long)` 生成引用元素，源 ID 始终来自当前触发消息；不引用被触发消息内部引用的历史图片。引用工厂签名已核对 QQ 9.3.50 原始 DEX 和 QFun 的原生调用方式。构造失败取消发送；私聊仍只有文字元素。
+- 智能插话的图片 `comment` 结果在网页转换前作一次均匀整数抽样，0–29 放行、30–99 保持安静。非图片点评、明确回答、@自己和私聊不受概率限制；去重确保同一消息不会反复抽样。被概率拒绝的图片经现有 `observeImage` 保留，没有伪造 assistant 回复。
+- 戳一戳读取 XML 的 `uin_str1/uin_str2`，或 JSON 1061 中依次出现的两个 UID。系统 sender 为 0 时使用真实操作者，拒绝自己戳人、目标为他人、缺失/歧义身份、普通文本冒充及旧消息。复用自动回复的当前风格、快照失效检查、名单、限速、忙碌、去重和免打扰；新增默认开启的 `pokeReplies` 子开关，并导入旧脚本全局戳一戳开关。群内戳一戳回复使用原生 @元素指向操作者，私聊纯文本。
+
+验证结果：
+
+- `python tools/test-core.py --json-jar ../.lingcat-review/json.jar`：69 项原有核心检查 + 26 项新回复检查，合计 **95 项通过**。包含所有 100 个抽样结果的穷举、引用工厂调用、带符号源消息 ID、引用失败不降级、两种私聊类型、XML/JSON 目标和操作者识别、缺失及歧义身份。JSON 部分使用本机已有 JVM org.json 实现；其他环境可通过 `--json-jar` 指定等价 JAR，省略参数时明确跳过 7 项 JSON 检查。
+- `:app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest`：通过。lint 为 **0 errors, 7 warnings**，涉及原有 ExifInterface、targetSdk、静态 Context、触控可访问性、文本拼接和 RTL 提示。本机使用 JDK 21、Gradle 8.9、SDK 36 的 aapt2；未为本次需求升级构建工具链。
+- 独立模块 APK 签名验证通过。配套 QQ APK 签名摘要保持 `c081890cf2a1adf13e56d7b50a4f3d8edb35b7c46d6ccc732dd997b7e433be1d`，除嵌入模块外 **40,319 项 ZIP 内容保持不变**，16KiB 对齐检查通过。
+- `git diff --check` 通过；交付独立模块、配套 QQ、源码 ZIP 和 SHA-256 清单。
+
+已按用户要求通过 ADB 保留数据覆盖安装配套 QQ：`adb install --no-streaming -r` 返回 Success，系统首次安装时间保持不变。安装前核对手机旧包 SHA-256 与本地 0.1.0 备份一致；安装后手机包 SHA-256 为 `778d1b89a768e3f967792c17b728ddecf35c92bf00e517cdb250b972541e4b44`，与 0.1.1 交付包一致。启动 QQ 后日志确认 `[LingStyle] 0.1.1 initialized QQ=9.3.50`。
+
+本轮没有向真实 QQ 联系人发送测试消息。AndroidTest 仅完成编译，未运行；新引用展示、真实戳一戳入站及四种风格的端到端送达仍需实际收发验证。以下 0.1.0 真机记录属于历史证据，不能作为 0.1.1 新功能已真机通过的证明。
+
+## 0.1.0 历史真机验证
 
 日期：2026-10-14。设备：已连接的 Android 16 / HyperOS 手机；QQ 9.3.50。模块：0.1.0。
 

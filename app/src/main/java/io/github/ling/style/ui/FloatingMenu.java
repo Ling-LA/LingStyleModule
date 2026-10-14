@@ -54,6 +54,7 @@ public final class FloatingMenu {
             values.put("key",auto.optString("回复_AI_API_KEY",""));values.put("model",auto.optString("回复_AI_模型",""));
             values.put("groups",auto.optString("回复_active_groups",""));values.put("blacklist",global.optString("好友黑名单",""));runtime.settings.update(values);
             if(auto.has("回复_当前聊天页不自动回复"))runtime.settings.flag("skipActive","开".equals(auto.optString("回复_当前聊天页不自动回复").trim()));
+            if(auto.has("sw_戳一戳回复@global"))runtime.settings.flag("pokeReplies","开".equals(auto.optString("sw_戳一戳回复@global").trim()));
             runtime.notice("已导入，转换和自动回复开关保持原状");
         }catch(Exception e){runtime.notice("导入失败："+e.getClass().getSimpleName());}
     }

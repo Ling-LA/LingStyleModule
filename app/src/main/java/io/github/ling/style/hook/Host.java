@@ -47,10 +47,34 @@ public final class Host {
         catch(Exception e){return "";}
     }
     public boolean friend(String uid){try{return Boolean.TRUE.equals(call(route("com.tencent.qqnt.ntrelation.friendsinfo.api.IFriendsInfoService"),"isFriend",uid,""));}catch(Exception e){return false;}}
+    public String uid(String uin){
+        try{String value=String.valueOf(call(route("com.tencent.relation.common.api.IRelationNTUinAndUidApi"),"getUidFromUin",uin));return value.matches("u_[A-Za-z0-9_-]+")?value:"";}
+        catch(Exception e){return "";}
+    }
     public Object contact(int type,String uid)throws Exception{return this.type("com.tencent.qqnt.kernelpublic.nativeinterface.Contact").getConstructor(int.class,String.class,String.class).newInstance(type,uid,"");}
     public ArrayList<Object> elements(String text)throws Exception{
         Object element=call(route("com.tencent.qqnt.msg.api.IMsgUtilApi"),"createTextElement",text);
         ArrayList<Object> out=new ArrayList<>();out.add(element);return out;
+    }
+    public ArrayList<Object> autoElements(int chatType,long sourceMessage,String pokeUid,String text)throws Exception{
+        return autoElements(route("com.tencent.qqnt.msg.api.IMsgUtilApi"),chatType,sourceMessage,pokeUid,pokeUid==null?"":uin(pokeUid),text);
+    }
+    static ArrayList<Object> autoElements(Object api,int chatType,long sourceMessage,String pokeUid,String pokeName,String text)throws Exception{
+        ArrayList<Object> out=new ArrayList<>();out.add(call(api,"createTextElement",text));
+        if(chatType!=2)return out;
+        if(pokeUid!=null){
+            // Gray-tip events are not quotable chat messages; address their actual actor.
+            if(pokeUid.isEmpty())throw new IllegalArgumentException("Unknown poke actor");
+            Object at=call(api,"createAtTextElement","@"+pokeName,pokeUid,2);
+            if(at==null||number(at,"elementType")!=1)throw new IllegalStateException("Missing mention element");
+            out.add(0,at);
+        }else{
+            if(sourceMessage==0)throw new IllegalArgumentException("Missing reply source");
+            Object reply=call(api,"createReplyElement",sourceMessage);
+            if(reply==null||number(reply,"elementType")!=7)throw new IllegalStateException("Missing reply element");
+            out.add(0,reply);
+        }
+        return out;
     }
     /** Only a single ordinary text element can be rewritten. Rich text/@/media stay intact. */
     public static String plain(Object raw){

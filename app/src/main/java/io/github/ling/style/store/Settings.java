@@ -27,6 +27,7 @@ public final class Settings {
     public boolean auto(){return prefs.getBoolean("auto",false);}
     public boolean skipActive(){return prefs.getBoolean("skipActive",false);}
     public boolean atOnly(){return prefs.getBoolean("atOnly",true);}
+    public boolean pokeReplies(){return prefs.getBoolean("pokeReplies",true);}
     public boolean diagnostic(){return prefs.getBoolean("diagnostic",false);}
     public boolean privateReplies(){return prefs.getBoolean("privateReplies",true);}
     public String get(String key,String fallback){return prefs.getString(key,fallback);}
@@ -45,12 +46,12 @@ public final class Settings {
         public final String account,endpoint,model,key,fallback;
         public final long revision;
         public final Style style;
-        public final boolean enabled,auto,atOnly,known,privateReplies,skipActive;
+        public final boolean enabled,auto,atOnly,known,privateReplies,skipActive,pokeReplies;
         public final Set<String> blacklist,groups;
         private Snapshot(Settings s){
             account=s.account;revision=s.revision.get();style=s.style();known=s.known();
             enabled=s.enabled();auto=s.auto();atOnly=s.atOnly();blacklist=s.blacklist();
-            privateReplies=s.privateReplies();skipActive=s.skipActive();
+            privateReplies=s.privateReplies();skipActive=s.skipActive();pokeReplies=s.pokeReplies();
             groups=Policy.blacklist(s.get("groups",""));
             endpoint=s.get("endpoint",io.github.ling.style.engine.ReplyClient.ENDPOINT);
             model=s.get("model",io.github.ling.style.engine.ReplyClient.MODEL);key=s.get("key","");fallback=s.get("fallback","收到，稍后回复你。");
