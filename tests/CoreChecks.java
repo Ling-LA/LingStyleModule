@@ -1,0 +1,115 @@
+import io.github.ling.style.core.*;
+import io.github.ling.style.hook.Host;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class CoreChecks {
+    static class Text {int atType;String atUid="",content="hello";}
+    static class Element {int elementType=1;Text textElement=new Text();}
+    static class Parent {private long value=7;private String echo(String text){return text;}}
+    static class Child extends Parent {}
+    static int count;
+    static void check(boolean value,String title){if(!value)throw new AssertionError(title);count++;System.out.println("PASS "+title);}
+    public static void main(String[] args)throws Exception{
+        check(Style.values().length==4,"four slots");
+        check(Style.LEWD.title.equals("淫语")&&Style.LEWD.available()&&Style.LEWD.url.endsWith("%E6%B7%AB%E8%AF%AD%E7%BF%BB%E8%AF%91%E5%99%A8"),"fourth style endpoint");
+        check(Style.from("RESERVED")==Style.CAT&&Style.from("LEWD")==Style.LEWD,"legacy placeholder falls back; fourth style selectable");
+        check(Style.from("CAT+TEASE")==Style.CAT,"combined legacy style cannot activate");
+        check(Policy.unprefix("/hello").equals("hello"),"slash bypass strips exactly one slash");
+        check(Policy.unprefix("//hello").equals("/hello"),"double slash preserves literal slash");
+        check(Policy.unprefix("/").equals("/"),"single slash does not create empty send");
+        Set<String> blocked=Policy.blacklist("12345\n67890，u_test;88888");
+        check(Policy.blocked(blocked,"other","u_test"),"UID blacklist");
+        check(Policy.blocked(blocked,"12345"),"numeric blacklist");
+        check(!Policy.blocked(blocked,"123456"),"blacklist uses exact identity");
+        ContactChoice friend=new ContactChoice("12345","friend","u_friend");
+        List<ContactChoice> contacts=Arrays.asList(friend,new ContactChoice("67890","second"));
+        Set<String> oldSelection=Policy.blacklist("u_friend 90000 u_unknown");
+        check(friend.selected(oldSelection),"picker recognizes an existing UID alias");
+        Set<String> selected=ContactChoice.apply(oldSelection,contacts,Collections.singleton("67890"));
+        check(selected.containsAll(Arrays.asList("90000","u_unknown","67890"))&&!selected.contains("u_friend"),"picker preserves manual entries while unchecking all friend aliases");
+        check(ContactChoice.apply(oldSelection,contacts,Collections.singleton("12345")).contains("12345"),"picker stores the selected canonical ID");
+        check(oldSelection.contains("u_friend")&&!oldSelection.contains("67890"),"picker draft does not mutate saved selection");
+        Policy.Seen seen=new Policy.Seen();
+        check(seen.first("a","p",-9,1),"signed message id accepted");
+        check(!seen.first("a","p",-9,2),"duplicate channel suppressed");
+        check(seen.first("b","p",-9,2),"accounts isolated");
+        check(seen.first("a","q",-9,2),"conversations isolated");
+        check(!seen.first("a","p",0,3),"zero id cannot auto-send");
+        check(seen.first("a","p",-9,300002),"expired dedupe entry purged");
+        check(!Policy.fresh(1,600000),"historical message rejected");
+        check(Policy.fresh(100,101000),"recent message accepted");
+        QuoteRef quote=new QuoteRef(-9,12,34,false,true);
+        check(quote.matches(-9,0)&&quote.matches(12,0),"quoted source matches signed local or replay ID");
+        check(quote.matches(88,34),"quoted source can match explicit server sequence");
+        check(!quote.matches(88,35)&&!quote.matches(0,0),"unrelated quoted record never accepted");
+        check(!new QuoteRef(-9,12,34,true,true).matches(-9,34),"expired quoted source rejected");
+        check(!new QuoteRef(0,0,0,false,true).valid(),"quote text alone cannot trigger history search");
+        Policy.Once once=new Policy.Once();AtomicInteger claims=new AtomicInteger();ExecutorService pool=Executors.newFixedThreadPool(8);
+        for(int i=0;i<100;i++)pool.submit(()->{if(once.claim())claims.incrementAndGet();});
+        pool.shutdown();pool.awaitTermination(5,TimeUnit.SECONDS);
+        check(claims.get()==1,"concurrent callbacks claim only one send");
+        Element element=new Element();
+        check("hello".equals(Host.plain(Collections.singletonList(element))),"ordinary native text eligible");
+        element.textElement.atUid="0";
+        check("hello".equals(Host.plain(Collections.singletonList(element))),"QQ zero atUid sentinel stays ordinary text");
+        element.textElement.atType=1;
+        check(Host.plain(Collections.singletonList(element))==null,"at-all zero UID still rejected");
+        element.textElement.atType=0;
+        element.textElement.atUid="u_other";
+        check(Host.plain(Collections.singletonList(element))==null,"mention text not rewritten");
+        element.textElement.atUid="";element.elementType=2;
+        check(Host.plain(Collections.singletonList(element))==null,"media not rewritten");
+        check(Host.plain(Arrays.asList(new Element(),new Element()))==null,"mixed elements not rewritten");
+        check(Host.number(new Child(),"value")==7,"inherited private field adapter");
+        check("test".equals(Host.call(new Child(),"echo","test")),"inherited method adapter");
+        ConversationMemory memory=new ConversationMemory(1000);
+        memory.commit("a:group:user","one","first",500);memory.commit("a:group:user","two","second",500);
+        check(memory.snapshot("a:group:user",500).size()==2,"context retains complete turns");
+        check(memory.snapshot("a:group:user",45).size()==1&&memory.snapshot("a:group:user",45).get(0).user.equals("two"),"context trims oldest complete turns");
+        check(memory.snapshot("b:group:user",500).isEmpty()&&memory.snapshot("a:other:user",500).isEmpty()&&memory.snapshot("a:group:other",500).isEmpty(),"context account conversation sender isolation");
+        check(memory.snapshot("a:group:user",1).isEmpty(),"oversized history omitted");
+        check(ConversationMemory.estimate("猫")>ConversationMemory.estimate("a"),"multibyte conservative token estimate");
+        memory.clear();check(memory.snapshot("a:group:user",500).isEmpty(),"history clearing");
+        String alice=Policy.replyScope("10001",2,"100000","u_alice","20001"),bob=Policy.replyScope("10001",2,"100000","u_bob","20002");
+        memory.commit(alice,"remember 7314","saved 7314",500);
+        check(memory.snapshot(bob,500).isEmpty(),"same group second sender starts without first sender history");
+        memory.commit(bob,"remember 9286","saved 9286",500);
+        memory.commit(alice,"what was my number?","7314",500);
+        check(memory.snapshot(alice,500).size()==2&&memory.snapshot(alice,500).get(0).user.contains("7314")&&memory.snapshot(bob,500).size()==1&&memory.snapshot(bob,500).get(0).user.contains("9286"),"interleaved group senders retain their own numbers");
+        check(alice.equals(Policy.replyScope("10001",2,"100000","","20001")),"resolved numeric identity remains stable when UID is absent");
+        check(!alice.equals(Policy.replyScope("10001",2,"100001","u_alice","20001"))&&!alice.equals(Policy.replyScope("10002",2,"100000","u_alice","20001")),"same sender stays isolated across group and account");
+        check(Policy.replyScope("10001",2,"100000","u_alice","")!=null&&Policy.replyScope("10001",2,"100000","0","0")==null&&Policy.replyScope("10001",2,"100000","","")==null,"unknown sender cannot enter a shared group history");
+        check(VisionPolicy.unsupported(400,"model does not support image_url"),"explicit unsupported image response learned");
+        check(!VisionPolicy.unsupported(401,"unsupported image_url")&&!VisionPolicy.unsupported(429,"unsupported image_url")&&!VisionPolicy.unsupported(500,"unsupported image_url"),"auth quota and server errors never disable vision");
+        check(!VisionPolicy.unsupported(400,"invalid image_url encoding")&&!VisionPolicy.unsupported(400,"unsupported max_tokens"),"invalid image and unrelated parameter errors never disable vision");
+        ConversationMemory visual=new ConversationMemory(20000);List<String> pictures=new ArrayList<>();pictures.add("data:image/jpeg;base64,synthetic");
+        visual.commit(alice,"picture question","number 7314",pictures,10000);pictures.clear();
+        check(visual.snapshot(alice,10000).get(0).images.size()==1,"vision history copies image list for follow-up");
+        check(visual.snapshot(bob,10000).isEmpty(),"same group other sender never sees retained images");
+        check(visual.snapshot(alice,100).isEmpty(),"image token allowance prunes complete visual turn");
+        visual.clear();check(visual.snapshot(alice,10000).isEmpty(),"clearing history also clears image references");
+        ConversationMemory boundedImages=new ConversationMemory(120);boundedImages.commit(alice,"x","y",Collections.singletonList("x".repeat(80)),10000);
+        check(boundedImages.snapshot(alice,10000).isEmpty(),"image bytes obey global RAM budget");
+        check(ModelLimits.official("deepseek-v4.1-flash")==1048576&&ModelLimits.official("unknown")==0,"official profile exact model matching");
+        check(ModelLimits.fromError("maximum context length is 32,768 tokens. Requested 50000")==32768,"server context error learning");
+        check(ModelLimits.fromError("you requested 100000 tokens")==0,"requested size never mistaken for model limit");
+        ConversationMemory small=new ConversationMemory(80);small.commit("a","x","y",80);small.commit("b","x","y",80);small.commit("c","x","y",80);
+        check(small.snapshot("a",80).isEmpty()&&small.snapshot("c",80).size()==1,"global history memory eviction");
+        ActiveConversation active=new ActiveConversation("10001",2,"group_a");
+        check(active.matches(true,true,"10001",2,"group_a"),"visible same group suppressed");
+        check(!active.matches(false,true,"10001",2,"group_a"),"active-chat switch off permits reply");
+        check(!active.matches(true,false,"10001",2,"group_a"),"background screen-off or departed page permits reply");
+        check(!active.matches(true,true,"10001",2,"group_b"),"another visible chat does not suppress target");
+        check(!active.matches(true,true,"10002",2,"group_a"),"stale previous account page cannot match");
+        check(!active.matches(true,true,"10001",1,"group_a"),"group and private chat identities differ");
+        check(new ActiveConversation("10001",1,"u_friend").matches(true,true,"10001",1,"u_friend"),"visible friend chat suppressed");
+        check(!new ActiveConversation("10001",2,"").matches(true,true,"10001",2,""),"unknown peer never matches");
+        ConversationMemory observed=new ConversationMemory(20000);
+        observed.commit(alice,"shared image","",Collections.singletonList("data:image/jpeg;base64,synthetic"),10000);
+        check(observed.snapshot(alice,10000).get(0).assistant.isEmpty()&&observed.snapshot(alice,10000).get(0).images.size()==1,"unanswered image preserved without fictitious assistant response");
+        check(observed.snapshot(bob,10000).isEmpty(),"unanswered image remains sender-isolated");
+        System.out.println("TOTAL "+count);
+    }
+}
