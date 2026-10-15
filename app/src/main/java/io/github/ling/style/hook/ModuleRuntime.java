@@ -23,7 +23,7 @@ public final class ModuleRuntime {
     public final IncomingImages images;
     public final ActiveChat activeChat;
     private final Handler main=new Handler(Looper.getMainLooper());
-    private final ThreadPoolExecutor work=new ThreadPoolExecutor(1,2,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(32));
+    private final ThreadPoolExecutor work=ReplyWorkers.create();
     private final ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();
     private final Policy.Seen seen=new Policy.Seen();
     private final Set<String> busy=ConcurrentHashMap.newKeySet();
@@ -266,6 +266,7 @@ public final class ModuleRuntime {
         PowerManager.WakeLock wake=wake();
         try{
             if(!same(owner,revision)||!settings.auto()||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
+            WebTranslator.Preload preload=translator.preload(owner,revision,style,()->same(owner,revision)&&settings.auto());
             List<String> imageData=Collections.emptyList();
             if(!pictures.isEmpty()||quote!=null){
                 replies.requireVision(config.endpoint,config.model,config.key);autoTrace="准备图片 · 屏幕="+interactive();writeDiagnostic();
@@ -287,7 +288,7 @@ public final class ModuleRuntime {
             if("comment".equals(answer.intent)){synchronized(this){if(SystemClock.elapsedRealtime()-lastAmbientSent.getOrDefault(lane,0L)<60000){if(same(owner,revision))replies.observeImage(answer);autoTrace="自然点评冷却中，保持安静";busy.remove(lane);release(wake);writeDiagnostic();return;}}}
             if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
             modelAt=System.currentTimeMillis();autoTrace="模型生成完成 · 屏幕="+interactive();writeDiagnostic();
-            translator.translate(style,answer.text,(result,failure)->{
+            translator.translate(preload,answer.text,(result,failure)->{
                 if(failure!=null){error(failure);busy.remove(lane);release(wake);return;}
                 webAt=System.currentTimeMillis();autoTrace="网页转换完成 · 屏幕="+interactive();writeDiagnostic();
                 if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}

@@ -13,6 +13,7 @@ public final class DeviceChecks extends Instrumentation {
     private Bundle args;
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);args=arguments==null?new Bundle():arguments;start();}
     @Override public void onStart(){
+        if(args.containsKey("preload")){Bundle report=io.github.ling.style.engine.PreloadChecks.run(this);finish(report.getBoolean("success")?-1:0,report);return;}
         if(args.containsKey("participation")){Bundle report=io.github.ling.style.engine.ParticipationChecks.run(getTargetContext());finish(report.getBoolean("success")?-1:0,report);return;}
         if(args.containsKey("vision")){Bundle report=io.github.ling.style.engine.VisionChecks.run(getTargetContext());finish(report.getBoolean("success")?-1:0,report);return;}
         if(args.containsKey("floating")){checkFloating();return;}
@@ -28,12 +29,17 @@ public final class DeviceChecks extends Instrumentation {
             android.os.PowerManager pm=(android.os.PowerManager)getTargetContext().getSystemService(android.content.Context.POWER_SERVICE);
             android.os.PowerManager.WakeLock wake=pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"LingStyle:device-check");wake.acquire(60000);
             report.putBoolean("interactive",pm.isInteractive());
-            runOnMainSync(()->{WebTranslator engine=new WebTranslator(getTargetContext());engine.translate(style,args.containsKey("replyBase")?"收到，稍后回复你。":"今天下午三点见。",(result,error)->{
+            runOnMainSync(()->{WebTranslator engine=new WebTranslator(getTargetContext());WebTranslator.Callback callback=(result,error)->{
                 report.putString("style",style.name());report.putString("web_error",error==null?"":error);
                 report.putInt("result_length",result==null?0:result.length());
                 report.putBoolean("success",error==null&&result!=null&&!result.trim().isEmpty());
                 report.putString("engine",engine.diagnostics);complete.countDown();
-            });
+            };
+                String input=args.containsKey("replyBase")?"收到，稍后回复你。":"今天下午三点见。";
+                if(args.containsKey("warmup")){
+                    WebTranslator.Preload lease=engine.preload("device-check",1,style,()->true);
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->engine.translate(lease,input,callback),3000);
+                }else engine.translate(style,input,callback);
                 // Test-only inspection of the rendered page for a fixed synthetic input.
                 if(args.containsKey("inspect"))new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->{
                     try{java.lang.reflect.Field f=WebTranslator.class.getDeclaredField("page");f.setAccessible(true);android.webkit.WebView page=(android.webkit.WebView)f.get(engine);
