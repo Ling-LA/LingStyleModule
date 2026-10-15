@@ -111,9 +111,7 @@ public final class ReplyClient {
             JSONObject body=new JSONObject().put("model",model).put("max_tokens",OUTPUT).put("stream",false).put("messages",messages);
             if(ModelLimits.official(model)>0)body.put("thinking",new JSONObject().put("type","disabled"));
             try{
-                JSONObject choice=request(endpoint,key,body,131072).getJSONArray("choices").getJSONObject(0);
-                String result=choice.getJSONObject("message").optString("content","").trim();
-                if(result.isEmpty()||result.length()>2000||"length".equals(choice.optString("finish_reason")))throw new IOException("模型返回空内容、过长或截断结果");
+                String result=ReplyProtocol.content(request(endpoint,key,body,131072));
                 if(hasImages)recordVision(id,true,"接口已接受多模态请求");
                 status=model+" · 回复生成成功\n上下文 "+cap.context+" tokens · "+cap.source+"\n本次历史 "+Math.max(0,(messages.length()-2)/2)+" 轮";
                 String intent="answer";
@@ -126,11 +124,7 @@ public final class ReplyClient {
         }throw new IOException("模型上下文协商失败");
     }
     static JSONObject decision(String result)throws Exception{
-        String text=result.trim();if(text.startsWith("```json")&&text.endsWith("```"))text=text.substring(7,text.length()-3).trim();
-        JSONObject value=new JSONObject(text);Object action=value.opt("action"),content=value.opt("text");
-        if(!(action instanceof String)||!(content instanceof String)||!Arrays.asList("answer","comment","silent").contains(action))throw new IOException("插话判断格式无效，已保持安静");
-        String reply=((String)content).trim();if("silent".equals(action))reply="";else if(reply.isEmpty()||reply.length()>400)throw new IOException("插话内容无效，已保持安静");
-        return new JSONObject().put("action",action).put("text",reply);
+        return ReplyProtocol.decision(result);
     }
     /** The selected website is the final author of style. Never regenerate or fall back here. */
     public String finishStyle(Answer answer,String styled)throws IOException{
@@ -155,7 +149,7 @@ public final class ReplyClient {
         return new JSONObject().put("role",role).put("content",content);
     }
     private static URL checked(String endpoint)throws IOException{URL u=new URL(endpoint);if(!"https".equals(u.getProtocol())||u.getUserInfo()!=null||u.getQuery()!=null||u.getRef()!=null)throw new IOException("接口必须是无查询参数的 HTTPS 地址");return u;}
-    private static final class HttpError extends IOException {final int code;final String detail;HttpError(int c,String d){super("回复接口 HTTP "+c);code=c;detail=d;}}
+    private static final class HttpError extends ReplyFault {final int code;final String detail;HttpError(int c,String d){super(FaultKind.MODEL_HTTP,"http."+c,"回复接口 HTTP "+c);code=c;detail=d;}}
     private static JSONObject request(String endpoint,String key,JSONObject body,int limit)throws Exception{
         HttpURLConnection c=(HttpURLConnection)checked(endpoint).openConnection();
         long started=System.nanoTime();String stage="建立 HTTPS 连接";
@@ -171,7 +165,7 @@ public final class ReplyClient {
             stage="读取响应";InputStream source=code>=200&&code<300?c.getInputStream():c.getErrorStream();
             if(source!=null)try(InputStream in=source){byte[] b=new byte[4096];int count;while((count=in.read(b))!=-1){if(bytes.size()+count>limit)throw new IOException("接口响应过大");bytes.write(b,0,count);}}
             String text=new String(bytes.toByteArray(),StandardCharsets.UTF_8);if(code<200||code>=300)throw new HttpError(code,text);
-            JSONObject json=new JSONObject(text);if(json.has("error"))throw new IOException("接口返回错误对象");return json;
+            JSONObject json=ReplyProtocol.response(text,body==null);if(json.has("error"))throw new ReplyFault(FaultKind.RESPONSE_SCHEMA,"response.error_object","接口返回错误对象");return json;
         }catch(SocketTimeoutException e){
             throw networkFailure(operation,stage,started,"超时；请稍后重试，若反复出现请检查网络或代理及接口服务",e);
         }catch(UnknownHostException e){
@@ -185,6 +179,7 @@ public final class ReplyClient {
         }finally{c.disconnect();}
     }
     private static IOException networkFailure(String operation,String stage,long started,String reason,IOException cause){
-        return new IOException(operation+" · "+stage+" · "+String.format(Locale.ROOT,"%.1f",(System.nanoTime()-started)/1e9)+" 秒："+reason,cause);
+        String phase=stage.equals("建立 HTTPS 连接")?"connect":stage.equals("提交请求")?"submit":stage.equals("等待响应")?"wait":"read";
+        return new ReplyFault(FaultKind.MODEL_NETWORK,"network."+phase+"."+cause.getClass().getSimpleName(),operation+" · "+stage+" · "+String.format(Locale.ROOT,"%.1f",(System.nanoTime()-started)/1e9)+" 秒："+reason,cause);
     }
 }

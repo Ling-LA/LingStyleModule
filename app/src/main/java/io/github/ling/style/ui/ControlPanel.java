@@ -22,6 +22,9 @@ public final class ControlPanel {
         return show(a,settings,web,status,importOld,replies,importLocal,null);
     }
     public static Dialog show(Activity a,Settings settings,WebTranslator web,Supplier<String> status,Runnable importOld,io.github.ling.style.engine.ReplyClient replies,Runnable importLocal,ContactPicker.Source roster){
+        return show(a,settings,web,status,importOld,replies,importLocal,roster,null);
+    }
+    public static Dialog show(Activity a,Settings settings,WebTranslator web,Supplier<String> status,Runnable importOld,io.github.ling.style.engine.ReplyClient replies,Runnable importLocal,ContactPicker.Source roster,Supplier<String> history){
         String owner=settings.account();
         LinearLayout shell=PinkTheme.column(a);shell.setBackground(PinkTheme.shape(a,PinkTheme.SOFT,24,0));
         shell.addView(PinkTheme.header(a,"玲 · 风格控制","选一种心情，让转换与自动回复使用同一风格"));
@@ -115,6 +118,11 @@ public final class ControlPanel {
         if(importOld!=null){Button restore=button(a,"导入旧脚本的 API、群号与黑名单");details.addView(restore);restore.setOnClickListener(v->{if(owner.equals(settings.account())){importOld.run();dialog.dismiss();}});}
         Switch diagnosticFile=toggle(a,"保存本机诊断（不含消息与密钥）",settings.diagnostic());details.addView(diagnosticFile);
         diagnosticFile.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("diagnostic",b);});
+        if(history!=null){Button faults=button(a,"异常分类与历史记录");details.addView(faults);faults.setOnClickListener(v->{
+            ScrollView list=new ScrollView(a);TextView content=text(a,history.get(),13);content.setPadding(dp(a,18),dp(a,12),dp(a,18),dp(a,12));content.setTextIsSelectable(true);list.addView(content);
+            AlertDialog report=new AlertDialog.Builder(a).setTitle("异常分类与历史记录").setView(list).setPositiveButton("关闭",null).setNeutralButton("刷新",null).create();
+            report.setOnShowListener(d->report.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(b->content.setText(history.get())));report.show();
+        });}
         TextView diagnostic=text(a,status.get(),12);diagnostic.setPadding(dp(a,12),dp(a,12),dp(a,12),dp(a,12));diagnostic.setBackground(PinkTheme.shape(a,PinkTheme.SOFT,12,0));PinkTheme.space(diagnostic,16,0);details.addView(diagnostic);
         Button refresh=button(a,"刷新运行状态");details.addView(refresh);refresh.setOnClickListener(v->diagnostic.setText(status.get()));
         details.addView(text(a,"自动回复：每个会话发送后冷却 10 秒，每分钟最多判断 10 次。未 @时每群最多每 10 秒判断一次，自然点评发送后该群 60 秒不再点评；正常提问与 @自己仍可回答。先生成回答或点评，再由当前风格网页转换，网页结果原样发送，不做二次改写。",12));

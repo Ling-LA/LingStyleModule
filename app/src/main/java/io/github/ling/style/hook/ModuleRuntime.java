@@ -22,6 +22,7 @@ public final class ModuleRuntime {
     public final BackgroundSupport background;
     public final IncomingImages images;
     public final ActiveChat activeChat;
+    public final io.github.ling.style.store.FaultStore faults;
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ThreadPoolExecutor work=ReplyWorkers.create();
     private final ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();
@@ -52,10 +53,19 @@ public final class ModuleRuntime {
     public volatile boolean hookInstalled,kernelInstalled;
     public final AtomicLong received=new AtomicLong(),duplicates=new AtomicLong(),submitted=new AtomicLong(),errors=new AtomicLong();
     public ModuleRuntime(Context context,ClassLoader loader){
-        this.context=context;host=new Host(loader);activeChat=new ActiveChat(context,host);settings=new Settings(context);translator=new WebTranslator(context);background=new BackgroundSupport(this);images=new IncomingImages(context,host);settings.onAutoChanged=()->{wasAuto=settings.auto();if(wasAuto)activeSince=System.currentTimeMillis()/1000L;background.sync();};
+        this.context=context;host=new Host(loader);activeChat=new ActiveChat(context,host);settings=new Settings(context);faults=new io.github.ling.style.store.FaultStore(context,timer);translator=new WebTranslator(context);background=new BackgroundSupport(this);images=new IncomingImages(context,host);settings.onAutoChanged=()->{wasAuto=settings.auto();if(wasAuto)activeSince=System.currentTimeMillis()/1000L;background.sync();};
     }
     public void start(){timer.scheduleWithFixedDelay(()->{refresh();background.sync();pollAllowedGroups();writeDiagnostic();},0,5,TimeUnit.SECONDS);}
-    public void error(String message){status=message;errors.incrementAndGet();XposedBridge.log("[LingStyle] "+message);autoTrace=message;writeDiagnostic();}
+    public void error(String message){FaultKind kind=FaultKind.fromMessage(message);recordFailure(kind,kind.name().toLowerCase(java.util.Locale.ROOT),message,settings.style());}
+    private void recordFailure(FaultKind kind,String code,String message,Style style){
+        status=message;if(kind!=FaultKind.CANCELLED)errors.incrementAndGet();faults.add(kind,style,code);
+        XposedBridge.log("[LingStyle] ["+kind.name()+":"+ReplyFault.safeCode(code)+"] "+message);autoTrace=message;writeDiagnostic();
+    }
+    private void failure(Throwable e,FaultKind stage,Style style){
+        ReplyFault known=e instanceof ReplyFault?(ReplyFault)e:null;
+        recordFailure(known==null?stage:known.kind,known==null?stage.name().toLowerCase(java.util.Locale.ROOT)+"."+e.getClass().getSimpleName():known.code,
+            stage.title+"失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName()),style);
+    }
     public void notice(String text){main.post(()->Toast.makeText(context,text,Toast.LENGTH_SHORT).show());}
     private synchronized void refresh(){
         try{
@@ -130,7 +140,7 @@ public final class ModuleRuntime {
         String text=String.valueOf(value).replaceAll("https?://[^\\s]+","[url]").replaceAll("[0-9]{5,}|u_[A-Za-z0-9_-]+","[id]");
         return text.substring(0,Math.min(160,text.length()));
     }
-    public String diagnostics(){return status+"\n发送接口 "+hookInstalled+" · 内核监听 "+kernelInstalled+"\n接收 "+received.get()+" · 去重 "+duplicates.get()+" · 提交 "+submitted.get()+" · 异常 "+errors.get()+"\n"+sendState+"\n"+prefixState+"\n"+translator.status+"\n"+replies.status+"\n"+replies.visionStatus+"\n"+images.status+"\n"+background.status+"\n"+autoTrace+" · QQ 确认 "+acknowledged.get()+"\n"+pollState+"\n"+activeChat.status();}
+    public String diagnostics(){return status+"\n发送接口 "+hookInstalled+" · 内核监听 "+kernelInstalled+"\n接收 "+received.get()+" · 去重 "+duplicates.get()+" · 提交 "+submitted.get()+" · 本次异常 "+errors.get()+" · 历史异常 "+faults.history.errors()+"\n"+sendState+"\n"+prefixState+"\n"+translator.status+"\n"+replies.status+"\n"+replies.visionStatus+"\n"+images.status+"\n"+background.status+"\n"+autoTrace+" · QQ 确认 "+acknowledged.get()+"\n"+pollState+"\n"+activeChat.status();}
     private boolean blocked(String... ids){return Policy.blocked(settings.blacklist(),ids);}
     private boolean same(String owner,long revision){return owner.equals(host.account())&&owner.equals(settings.account())&&revision==settings.revision.get();}
 
@@ -263,23 +273,30 @@ public final class ModuleRuntime {
     }
     private void autoReply(Settings.Snapshot config,int type,String uid,String peer,String sender,String senderUid,String input,String lane,String scope,long message,List<IncomingImages.Picture> pictures,QuoteRef quote,boolean smart,boolean poke){
         String owner=config.account;long revision=config.revision;Style style=config.style;
+        FaultKind phase=FaultKind.MODEL;boolean hasImages=!pictures.isEmpty()||(quote!=null&&quote.imageHint);
         PowerManager.WakeLock wake=wake();
         try{
             if(!same(owner,revision)||!settings.auto()||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
             WebTranslator.Preload preload=translator.preload(owner,revision,style,()->same(owner,revision)&&settings.auto());
+            QuotedImages.Source source=null;
+            if(quote!=null){phase=FaultKind.QUOTE;autoTrace="读取当前会话内的引用内容";source=new QuotedImages(host).resolve(config,type,uid,message,quote);}
+            String modelInput=QuotedText.context(input,source==null?"":source.text);
+            hasImages=!pictures.isEmpty()||(source!=null&&!source.pictures.isEmpty());
             List<String> imageData=Collections.emptyList();
-            if(!pictures.isEmpty()||quote!=null){
+            if(hasImages){
+                phase=FaultKind.IMAGE;
                 replies.requireVision(config.endpoint,config.model,config.key);autoTrace="准备图片 · 屏幕="+interactive();writeDiagnostic();
-                QuotedImages.Source source=null;
-                if(quote!=null){autoTrace="读取当前会话内的引用图片 · 屏幕="+interactive();writeDiagnostic();source=new QuotedImages(host).resolve(config,type,uid,message,quote);}
                 if(pictures.size()+(source==null?0:source.pictures.size())>VisionPolicy.MAX_IMAGES)throw new java.io.IOException("当前消息及引用合计超过 2 张图片，已跳过");
                 List<String> loaded=new ArrayList<>();
-                if(source!=null)loaded.addAll(images.load(owner,type,uid,source.message,source.pictures,true));
+                if(source!=null&&!source.pictures.isEmpty())loaded.addAll(images.load(owner,type,uid,source.message,source.pictures,true));
                 if(!pictures.isEmpty())loaded.addAll(images.load(owner,type,uid,message,pictures));
                 imageData=loaded;
                 if(!same(owner,revision)||!settings.auto()||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
             }
-            ReplyClient.Answer answer=replies.reply(scope,input,imageData,config.endpoint,config.model,config.key,config.fallback,smart);
+            if(!same(owner,revision)||!settings.auto()||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
+            phase=FaultKind.MODEL;
+            if(modelInput.trim().isEmpty()&&imageData.isEmpty()){autoTrace="引用内容无可用文字或图片，保持安静";busy.remove(lane);release(wake);return;}
+            ReplyClient.Answer answer=replies.reply(scope,modelInput,imageData,config.endpoint,config.model,config.key,config.fallback,smart);
             if(answer.silent()){if(same(owner,revision))replies.observeImage(answer);autoTrace="模型判断无需插话，保持安静";busy.remove(lane);release(wake);writeDiagnostic();return;}
             if(!Policy.allowImageComment(smart,!imageData.isEmpty(),answer.intent,ThreadLocalRandom.current().nextInt(100))){
                 if(same(owner,revision))replies.observeImage(answer);
@@ -289,7 +306,7 @@ public final class ModuleRuntime {
             if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
             modelAt=System.currentTimeMillis();autoTrace="模型生成完成 · 屏幕="+interactive();writeDiagnostic();
             translator.translate(preload,answer.text,(result,failure)->{
-                if(failure!=null){error(failure);busy.remove(lane);release(wake);return;}
+                if(failure!=null){FaultKind kind=FaultKind.fromMessage(failure);recordFailure(kind,kind.name().toLowerCase(java.util.Locale.ROOT),failure,style);busy.remove(lane);release(wake);return;}
                 webAt=System.currentTimeMillis();autoTrace="网页转换完成 · 屏幕="+interactive();writeDiagnostic();
                 if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
                 try{
@@ -300,17 +317,19 @@ public final class ModuleRuntime {
                     });
                 }catch(Exception e){busy.remove(lane);release(wake);error("网页风格结果不可发送："+e.getMessage());}
             });
-        }catch(Throwable e){if((!pictures.isEmpty()||(quote!=null&&quote.imageHint))&&same(owner,revision))replies.unreadImage(scope,config.endpoint,config.model,config.key);busy.remove(lane);release(wake);error("回复生成失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName()));}
+        }catch(Throwable e){if(hasImages&&same(owner,revision))replies.unreadImage(scope,config.endpoint,config.model,config.key);busy.remove(lane);release(wake);failure(e,phase,style);}
     }
     private void submitAuto(Settings.Snapshot config,int type,String uid,String lane,long sourceMessage,String pokeUid,ReplyClient.Answer answer,String result,PowerManager.WakeLock wake){
         if(skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
         final Policy.Once once=new Policy.Once();final Runnable[] timeout={null};
+        final String[] submitFailure={null};
         java.util.function.IntConsumer complete=code->{
             if(!once.claim())return;
             if(timeout[0]!=null)main.removeCallbacks(timeout[0]);
             ackAt=System.currentTimeMillis();
             if(code==0){acknowledged.incrementAndGet();synchronized(this){long now=SystemClock.elapsedRealtime();lastReply.put(lane,now);if("comment".equals(answer.intent))lastAmbientSent.put(lane,now);}if(same(config.account,config.revision))replies.commit(answer,result);status="QQ 已确认自动回复发送成功 · "+config.style.title;autoTrace="QQ 返回成功 · "+answer.intent+" · 屏幕="+interactive();}
-            else error(code==-999?"QQ 发送结果确认超时（不自动重发）":"QQ 自动回复返回错误码 "+code);
+            else recordFailure(FaultKind.SEND,code==-998?"send.submit":code==-999?"send.ack_timeout":"send.code."+code,
+                code==-998?"自动回复提交异常："+submitFailure[0]:code==-999?"QQ 发送结果确认超时（不自动重发）":"QQ 自动回复返回错误码 "+code,config.style);
             busy.remove(lane);release(wake);writeDiagnostic();
         };
         timeout[0]=()->complete.accept(-999);
@@ -329,7 +348,7 @@ public final class ModuleRuntime {
             long id=((Number)Host.call(service,"generateMsgUniqueId",type,System.currentTimeMillis())).longValue();
             sendAt=System.currentTimeMillis();autoTrace="等待 QQ 发送结果 · 屏幕="+interactive();main.postDelayed(timeout[0],20000);writeDiagnostic();
             invokeSend(send,service,new Object[]{id,contact,host.autoElements(type,sourceMessage,pokeUid,result),new HashMap<>(),callback});
-        }catch(Throwable e){error("自动回复提交异常："+e.getClass().getSimpleName());complete.accept(-998);}
+        }catch(Throwable e){submitFailure[0]=e.getClass().getSimpleName();complete.accept(-998);}
     }
     /** Opt-in diagnostic state contains no peer IDs, message text, key or license. */
     private synchronized void writeDiagnostic(){
@@ -341,7 +360,7 @@ public final class ModuleRuntime {
                 .put("recvCallbacks",recvCallbacks.get()).put("addCallbacks",addCallbacks.get()).put("fileCallbacks",fileCallbacks.get())
                 .put("pollCallbacks",pollCallbacks.get()).put("pollFailures",pollFailures.get())
                 .put("pollState",pollState).put("receiveShape",receiveShape)
-                .put("activeChat",activeChat.status()).put("skipActive",settings.skipActive()).put("background",background.status).put("vision",replies.visionStatus).put("images",images.status).put("submitted",submitted.get()).put("acknowledged",acknowledged.get()).put("errors",errors.get()).put("stage",autoTrace).put("status",status).put("web",translator.status);
+                .put("activeChat",activeChat.status()).put("skipActive",settings.skipActive()).put("background",background.status).put("vision",replies.visionStatus).put("images",images.status).put("submitted",submitted.get()).put("acknowledged",acknowledged.get()).put("errors",errors.get()).put("stage",autoTrace).put("status",status).put("web",translator.status).put("errorHistory",faults.history.encode());
             java.io.File tmp=new java.io.File(dir,"LingStyleDiagnostic.tmp"),file=new java.io.File(dir,"LingStyleDiagnostic.json");
             java.nio.file.Files.write(tmp.toPath(),j.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));java.nio.file.Files.move(tmp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }catch(Exception ignored){}

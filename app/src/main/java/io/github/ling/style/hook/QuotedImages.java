@@ -14,7 +14,8 @@ public final class QuotedImages {
     public static final class Source {
         public final long message;
         public final List<IncomingImages.Picture> pictures;
-        Source(long id,List<IncomingImages.Picture> pics){message=id;pictures=Collections.unmodifiableList(new ArrayList<>(pics));}
+        public final String text;
+        Source(long id,List<IncomingImages.Picture> pics,String text){message=id;pictures=Collections.unmodifiableList(new ArrayList<>(pics));this.text=text;}
     }
     public static QuoteRef snapshot(Object element)throws Exception{
         Object r=Host.field(element,"replyElement");
@@ -22,16 +23,20 @@ public final class QuotedImages {
             Boolean.TRUE.equals(Host.field(r,"sourceMsgExpired")),Boolean.TRUE.equals(Host.field(r,"sourceMsgIsIncPic")));
     }
     public Source resolve(Settings.Snapshot config,int type,String peer,long current,QuoteRef ref)throws Exception{
-        if(!ref.valid())throw new IOException("引用图片已过期或缺少消息标识");
+        return resolve(ref,fetch->query(config,type,peer,current,ref,fetch));
+    }
+    interface Lookup {Source read(boolean fetch)throws Exception;}
+    static Source resolve(QuoteRef ref,Lookup lookup)throws Exception{
+        if(!ref.valid())throw new IOException("引用消息已过期或缺少消息标识");
         // QQ's AIOReplyComponent resolves the source first, then downloads its element
         // through the enclosing reply message. Source records may have synthetic IDs.
-        Source source=ref.sequence>0?query(config,type,peer,current,ref,true):null;
-        if(source==null||source.pictures.isEmpty()){
-            Source fetched=query(config,type,peer,current,ref,false);
+        Source source=ref.sequence>0?lookup.read(true):null;
+        if(source==null||(source.pictures.isEmpty()&&(ref.imageHint||source.text.isEmpty()))){
+            Source fetched=lookup.read(false);
             if(fetched!=null)source=fetched;
         }
-        if(source==null)throw new IOException("QQ 未能读取被引用的图片，请重新发送图片");
-        if(source.pictures.isEmpty())throw new IOException("引用的消息没有可用的普通图片");
+        if(source==null)throw new IOException("QQ 未能读取被引用的消息，请重新发送内容");
+        if(ref.imageHint&&source.pictures.isEmpty())throw new IOException("引用图片不可用，请重新发送图片");
         return source;
     }
     private Source query(Settings.Snapshot config,int type,String peer,long current,QuoteRef ref,boolean fetch)throws Exception{
@@ -49,9 +54,12 @@ public final class QuotedImages {
                         if(Host.number(record,"chatType")!=type||!peer.equals(Host.text(record,"peerUid"))||!ref.matches(Host.number(record,"msgId"),Host.number(record,"msgSeq")))continue;
                         String senderUid=Host.text(record,"senderUid"),sender=Host.text(record,"senderUin");if(!sender.matches("[1-9][0-9]+"))sender=host.uin(senderUid);
                         if(Policy.blocked(config.blacklist,sender,senderUid)||(!config.blacklist.isEmpty()&&sender.isEmpty()))throw new IOException("引用来源被黑名单规则跳过");
-                        List<IncomingImages.Picture> pictures=new ArrayList<>();Object elements=Host.field(record,"elements");
-                        if(elements instanceof List)for(Object e:((List<?>)elements).toArray())if(Host.number(e,"elementType")==2){pictures.add(IncomingImages.snapshot(e));if(pictures.size()>VisionPolicy.MAX_IMAGES)throw new IOException("引用消息超过 2 张图片，已跳过");}
-                        result.compareAndSet(null,new Source(fetch?current:Host.number(record,"msgId"),pictures));break;
+                        List<IncomingImages.Picture> pictures=new ArrayList<>();StringBuilder text=new StringBuilder();Object elements=Host.field(record,"elements");
+                        if(elements instanceof List)for(Object e:((List<?>)elements).toArray()){
+                            if(Host.number(e,"elementType")==2){pictures.add(IncomingImages.snapshot(e));if(pictures.size()>VisionPolicy.MAX_IMAGES)throw new IOException("引用消息超过 2 张图片，已跳过");}
+                            else if(Host.number(e,"elementType")==1&&text.length()<2000){String part=Host.text(Host.field(e,"textElement"),"content");text.append(part,0,Math.min(part.length(),2000-text.length()));}
+                        }
+                        result.compareAndSet(null,new Source(fetch?current:Host.number(record,"msgId"),pictures,text.toString()));break;
                     }
                 }
             }catch(Exception error){failure.set(error);}finally{done.countDown();}

@@ -14,8 +14,9 @@ subprocess.run(['java','-cp',str(classes),'WorkerChecks'],check=True)
 classpath=str(classes)+(os.pathsep+str(args.json_jar.resolve()) if args.json_jar else '')
 subprocess.run(['java','-cp',classpath,'io.github.ling.style.hook.ReplyChecks',*(['json'] if args.json_jar else [])],check=True)
 if args.json_jar:
-    subprocess.run(['javac','-encoding','UTF-8','-cp',classpath,'-d',str(classes),str(root/'app/src/main/java/io/github/ling/style/engine/ReplyClient.java'),str(root/'tests/StyleOutputChecks.java'),str(root/'tests/NetworkChecks.java')],check=True)
+    subprocess.run(['javac','-encoding','UTF-8','-cp',classpath,'-d',str(classes),str(root/'app/src/main/java/io/github/ling/style/engine/ReplyClient.java'),str(root/'app/src/main/java/io/github/ling/style/engine/ReplyProtocol.java'),str(root/'tests/StyleOutputChecks.java'),str(root/'tests/NetworkChecks.java'),str(root/'tests/FaultChecks.java')],check=True)
     subprocess.run(['java','-cp',classpath,'io.github.ling.style.engine.StyleOutputChecks'],check=True)
     subprocess.run(['java','-cp',classpath,'io.github.ling.style.engine.NetworkChecks'],check=True)
+    subprocess.run(['java','-cp',classpath,'io.github.ling.style.engine.FaultChecks'],check=True)
 else:
     print('SKIP reply-engine regression checks: pass --json-jar with a JVM org.json implementation')

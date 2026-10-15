@@ -21,7 +21,7 @@ public final class FloatingMenu {
         EdgeBubble icon=new EdgeBubble(a);icons.put(a,icon);icon.mount((ViewGroup)decor);
         icon.setOnClickListener(v->{
             icon.setMenuOpen(true);
-            android.app.Dialog dialog=ControlPanel.show(a,runtime.settings,runtime.translator,runtime::diagnostics,this::importOld,runtime.replies,()->importLocal(a),new io.github.ling.style.hook.ContactRoster(runtime.host)::load);
+            android.app.Dialog dialog=ControlPanel.show(a,runtime.settings,runtime.translator,runtime::diagnostics,this::importOld,runtime.replies,()->importLocal(a),new io.github.ling.style.hook.ContactRoster(runtime.host)::load,runtime.faults::report);
             dialog.setOnDismissListener(d->icon.setMenuOpen(false));
         });
     }
