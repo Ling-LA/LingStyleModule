@@ -13,6 +13,7 @@ public final class DeviceChecks extends Instrumentation {
     private Bundle args;
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);args=arguments==null?new Bundle():arguments;start();}
     @Override public void onStart(){
+        if(args.containsKey("connection")){Bundle report=io.github.ling.style.engine.ConnectionChecks.run(getTargetContext());finish(report.getBoolean("success")?-1:0,report);return;}
         if(args.containsKey("preload")){Bundle report=io.github.ling.style.engine.PreloadChecks.run(this);finish(report.getBoolean("success")?-1:0,report);return;}
         if(args.containsKey("participation")){Bundle report=io.github.ling.style.engine.ParticipationChecks.run(getTargetContext());finish(report.getBoolean("success")?-1:0,report);return;}
         if(args.containsKey("vision")){Bundle report=io.github.ling.style.engine.VisionChecks.run(getTargetContext());finish(report.getBoolean("success")?-1:0,report);return;}

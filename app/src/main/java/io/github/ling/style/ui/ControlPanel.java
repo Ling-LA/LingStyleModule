@@ -104,9 +104,9 @@ public final class ControlPanel {
         Button detect=button(a,"检测模型连接与上下文");details.addView(detect);
         detect.setOnClickListener(v->{
             Settings.Snapshot config=settings.snapshot();detect.setEnabled(false);capability.setText("正在检测已保存的模型设置…");
-            new Thread(()->{String report;try{replies.inspect(config.endpoint,config.model,config.key);replies.reply("diagnostic:"+config.account,"这是一条接口测试，请简短回复连接成功。",config.endpoint,config.model,config.key,config.fallback);report=replies.status;}
+            new Thread(()->{String report;try{report=replies.testConnection(config.endpoint,config.model,config.key,stage->a.runOnUiThread(()->{if(dialog.isShowing()&&owner.equals(settings.account())&&config.revision==settings.revision.get())capability.setText(stage);}));}
                 catch(Exception e){report="检测失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName());}
-                final String value=report;a.runOnUiThread(()->{if(dialog.isShowing()&&owner.equals(settings.account())){detect.setEnabled(true);capability.setText(value);}});
+                final String value=report;a.runOnUiThread(()->{if(dialog.isShowing()&&owner.equals(settings.account())){detect.setEnabled(true);capability.setText(config.revision==settings.revision.get()?value:"设置已变化，请重新检测当前配置");}});
             },"LingStyle-model-check").start();
         });
         Button clear=button(a,"清空自动回复上下文");details.addView(clear);clear.setOnClickListener(v->{replies.clear();Toast.makeText(a,"已清空内存中的对话上下文",Toast.LENGTH_SHORT).show();});
