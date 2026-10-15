@@ -117,7 +117,7 @@ public final class ControlPanel {
         diagnosticFile.setOnCheckedChangeListener((v,b)->{if(owner.equals(settings.account()))settings.flag("diagnostic",b);});
         TextView diagnostic=text(a,status.get(),12);diagnostic.setPadding(dp(a,12),dp(a,12),dp(a,12),dp(a,12));diagnostic.setBackground(PinkTheme.shape(a,PinkTheme.SOFT,12,0));PinkTheme.space(diagnostic,16,0);details.addView(diagnostic);
         Button refresh=button(a,"刷新运行状态");details.addView(refresh);refresh.setOnClickListener(v->diagnostic.setText(status.get()));
-        details.addView(text(a,"自动回复：每个会话发送后冷却 10 秒，每分钟最多判断 10 次。未 @时每群最多每 10 秒判断一次，自然点评发送后该群 60 秒不再点评；正常提问与 @自己仍可回答。网页转换后会校对回答/点评意图，额外调用一次已配置模型。",12));
+        details.addView(text(a,"自动回复：每个会话发送后冷却 10 秒，每分钟最多判断 10 次。未 @时每群最多每 10 秒判断一次，自然点评发送后该群 60 秒不再点评；正常提问与 @自己仍可回答。先生成回答或点评，再由当前风格网页转换，网页结果原样发送，不做二次改写。",12));
         LinearLayout footer=PinkTheme.column(a);footer.setPadding(dp(a,18),0,dp(a,18),dp(a,14));shell.addView(footer);
         Button close=button(a,"关闭");footer.addView(close);close.setOnClickListener(v->dialog.dismiss());
         dialog.show();

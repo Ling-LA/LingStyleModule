@@ -63,7 +63,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 public void onActivityStopped(Activity a){}
                 public void onActivitySaveInstanceState(Activity a,Bundle b){}
             });
-            runtime.start();XposedBridge.log("[LingStyle] 0.1.1 initialized QQ="+version);
+            runtime.start();XposedBridge.log("[LingStyle] 0.1.2 initialized QQ="+version);
         }catch(Throwable e){
             if(!started&&++attempts<30)new Handler(Looper.getMainLooper()).postDelayed(()->start(app),1000);
             else {XposedBridge.log("[LingStyle] init failed "+e.getClass().getSimpleName());XposedBridge.log(e);}

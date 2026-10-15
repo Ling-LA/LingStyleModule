@@ -24,11 +24,13 @@ public final class ParticipationChecks {
             ReplyClient.Answer question=client.reply("synthetic:question","请问群里有谁知道，三角形有几条边？",Collections.emptyList(),endpoint,model,key,"",true);
             if(!question.intent.equals("answer")||!(question.text.contains("三")||question.text.contains("3")))throw new AssertionError("public question");out.putBoolean("real_public_question_answered",true);
             ReplyClient.Answer direct=new ReplyClient.Answer("图片中是红色正方形和蓝色圆形。","","这个图片是什么内容？",10000,Collections.emptyList(),0);
-            String aligned=client.alignStyle(direct,"主人主人，快看快看喵！我发现一张红色正方形和蓝色圆形的图片啦！（兴奋地摇尾巴）",endpoint,model,key);
-            if(aligned.contains("快看")||aligned.contains("我发现")||!aligned.contains("红")||!aligned.contains("蓝"))throw new AssertionError("answer intent changed");out.putBoolean("real_style_preserves_answer_intent",true);out.putString("synthetic_answer",aligned);
+            String styledAnswer="主人，图片中是红色正方形和蓝色圆形喵。";
+            String aligned=client.finishStyle(direct,styledAnswer);
+            if(!styledAnswer.equals(aligned))throw new AssertionError("website answer rewritten");out.putBoolean("website_answer_preserved_exactly",true);
             ReplyClient.Answer comment=new ReplyClient.Answer("这片晚霞的颜色真漂亮。","","分享今天的晚霞",10000,Collections.emptyList(),0,"comment");
-            String natural=client.alignStyle(comment,"你问的图片内容是晚霞，答案是橙红色的天空喵。",endpoint,model,key);
-            if(natural.contains("你问")||natural.contains("答案是")||natural.contains("图片内容是")||natural.contains("橙红"))throw new AssertionError("comment sounds like Q&A");out.putBoolean("real_comment_not_question_answer",true);out.putString("synthetic_comment",natural);
+            String styledComment="哼，这片晚霞还挺漂亮的嘛～";
+            String natural=client.finishStyle(comment,styledComment);
+            if(!styledComment.equals(natural))throw new AssertionError("website comment rewritten");out.putBoolean("website_comment_preserved_exactly",true);
             Bitmap bitmap=Bitmap.createBitmap(512,384,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bitmap);canvas.drawColor(Color.WHITE);Paint paint=new Paint();paint.setColor(Color.RED);canvas.drawRect(30,60,180,210,paint);paint.setColor(Color.BLUE);canvas.drawCircle(350,160,70,paint);
             try(OutputStream file=new FileOutputStream(card)){bitmap.compress(Bitmap.CompressFormat.JPEG,90,file);}finally{bitmap.recycle();}
             ReplyClient.Answer picture=client.reply("synthetic:share","随手画了张几何小图，发群里留个纪念。",Collections.singletonList(ImageCodec.encode(card)),endpoint,model,key,"",true);

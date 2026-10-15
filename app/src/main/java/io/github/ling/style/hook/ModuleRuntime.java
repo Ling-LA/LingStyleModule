@@ -285,21 +285,19 @@ public final class ModuleRuntime {
                 autoTrace="图片主动点评未命中 30% 概率，保留图片供追问";busy.remove(lane);release(wake);writeDiagnostic();return;
             }
             if("comment".equals(answer.intent)){synchronized(this){if(SystemClock.elapsedRealtime()-lastAmbientSent.getOrDefault(lane,0L)<60000){if(same(owner,revision))replies.observeImage(answer);autoTrace="自然点评冷却中，保持安静";busy.remove(lane);release(wake);writeDiagnostic();return;}}}
+            if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
             modelAt=System.currentTimeMillis();autoTrace="模型生成完成 · 屏幕="+interactive();writeDiagnostic();
             translator.translate(style,answer.text,(result,failure)->{
                 if(failure!=null){error(failure);busy.remove(lane);release(wake);return;}
                 webAt=System.currentTimeMillis();autoTrace="网页转换完成 · 屏幕="+interactive();writeDiagnostic();
                 if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
-                try{work.execute(()->{
-                    try{
-                        if(!same(owner,revision)||!settings.auto()||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
-                        String aligned=replies.alignStyle(answer,result,config.endpoint,config.model,config.key);
-                        main.post(()->{
-                            if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
-                            submitAuto(config,type,uid,lane,message,poke?senderUid:null,answer,aligned,wake);
-                        });
-                    }catch(Throwable e){busy.remove(lane);release(wake);error("回复语气校对失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName()));}
-                });}catch(RejectedExecutionException full){busy.remove(lane);release(wake);error("回复校对队列已满");}
+                try{
+                    final String styled=replies.finishStyle(answer,result);
+                    main.post(()->{
+                        if(!same(owner,revision)||!settings.auto()||blocked(uid,peer,sender,senderUid)||skipActive(config,type,uid)){busy.remove(lane);release(wake);return;}
+                        submitAuto(config,type,uid,lane,message,poke?senderUid:null,answer,styled,wake);
+                    });
+                }catch(Exception e){busy.remove(lane);release(wake);error("网页风格结果不可发送："+e.getMessage());}
             });
         }catch(Throwable e){if((!pictures.isEmpty()||(quote!=null&&quote.imageHint))&&same(owner,revision))replies.unreadImage(scope,config.endpoint,config.model,config.key);busy.remove(lane);release(wake);error("回复生成失败："+(e instanceof java.io.IOException?e.getMessage():e.getClass().getSimpleName()));}
     }
